@@ -68,6 +68,11 @@ function normalizeDocument(input,label){
 }
 function parseCSV(text,label){
  let columns,separator=',',cell='',row=[],quoted=false,fieldStart=true,line=0;const entries=new Map(),roots=[];
+ const columnNames={'文件名称':'filename','大小':'size','分配':'allocated','修改时间':'modified','文件':'files','文件夹':'folders'};
+ function headerColumns(values){
+  const keys=values.map(value=>{const key=value.trim().toLowerCase().replaceAll(' ','');return columnNames[key]||key});
+  return keys.includes('filename')&&(keys.includes('allocated')||keys.includes('size'))?new Map(keys.map((key,index)=>[key,index])):null;
+ }
  function clean(p){const unc=p.startsWith('\\\\')||p.startsWith('//');return(unc?'\\':'')+p.replaceAll('/','\\').replace(/\\+/g,'\\')}
  function ensure(path,folder){
   path=clean(path);const key=path.replace(/\\$/,'').toLowerCase();let node=entries.get(key);if(node){if(folder&&node.kind==='file'&&node.listed)throw Error('同一路径同时被用作文件和文件夹：'+path);return node}
@@ -77,7 +82,7 @@ function parseCSV(text,label){
  }
  function consume(values){
   line++;if(values.every(v=>!v.trim()))return;
-  if(!columns){const keys=values.map(v=>v.trim().toLowerCase().replaceAll(' ',''));if(keys.includes('filename')&&(keys.includes('allocated')||keys.includes('size')))columns=new Map(keys.map((k,i)=>[k,i]));else if(line>100)throw Error('未找到 WizTree CSV 表头（File Name、Allocated / Size）');return}
+  if(!columns){columns=headerColumns(values);if(!columns&&line>100)throw Error('未找到 WizTree CSV 表头（File Name / 文件名称、Allocated / 分配 或 Size / 大小）');return}
   const field=key=>values[columns.get(key)],path=field('filename')?.trim();if(!path)throw Error('CSV 第 '+line+' 行缺少 File Name');
   if(!/^(?:[a-z]:[\\/]|\\\\[^\\]+\\[^\\]+|\/\/[^/]+\/[^/]+)/i.test(path))throw Error('CSV 需要 Windows 绝对路径：'+path);
   const folder=/[\\/]$/.test(path),node=ensure(path,folder);if(node.listed)throw Error('CSV 包含重复路径：'+path);node.listed=true;
@@ -86,7 +91,7 @@ function parseCSV(text,label){
   for(const [source,dest]of Object.entries(fields)){const value=field(source);if(value!==undefined&&value!=='')node[dest]=number(value,'CSV 第 '+line+' 行的 '+source)}
   if(field('modified'))node.modified=field('modified');
  }
- const header=text.split(/\r?\n/,101).find(line=>/File[ ]?Name/i.test(line)&&/Allocated|Size/i.test(line));if(header)separator=header.includes('\t')?'\t':header.includes(';')?';':',';
+ for(const line of text.split(/\r?\n/,101)){const candidate=[',',';','\t'].find(sep=>headerColumns(line.replaceAll('"','').split(sep)));if(candidate){separator=candidate;break}}
  for(let i=0;i<text.length;i++){
   const c=text[i];if(quoted){if(c==='"'){if(text[i+1]==='"'){cell+='"';i++}else quoted=false}else cell+=c;continue}
   if(c==='"'&&fieldStart){quoted=true;fieldStart=false}else if(c===separator){row.push(cell);cell='';fieldStart=true}else if(c==='\n'||c==='\r'){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cell);consume(row);row=[];cell='';fieldStart=true}else{cell+=c;fieldStart=false}
